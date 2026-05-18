@@ -1,178 +1,73 @@
 #!/usr/bin/env Rscript
 
 suppressPackageStartupMessages({
-  library(data.table)
+  library(ggplot2)
   library(optparse)
 })
 
-########################################
-# ARGUMENT
-########################################
-
 option_list <- list(
-  make_option("--madura", type="character"),
-  make_option("--pelaihari", type="character"),
-  make_option("--fst", type="character"),
-  make_option("--roh", type="character"),
-  make_option("--gtf", type="character"),
-  make_option("--outdir", type="character", default="result")
+  make_option("--meta", type="character"),
+  make_option("--eigenvec", type="character"),
+  make_option("--eigenval", type="character"),
+  make_option("--out", type="character", default="PCA.png")
 )
 
 opt <- parse_args(OptionParser(option_list=option_list))
 
-dir.create(opt$outdir, showWarnings=FALSE)
+meta_path     <- opt$meta
+eigenvec_path <- opt$eigenvec
+eigenval_path <- opt$eigenval
+out_path      <- opt$out
+
+meta <- read.csv(meta_path, stringsAsFactors = FALSE)
+stopifnot(all(c("ID","Breed","Bangsa") %in% names(meta)))
+
+meta$ID     <- trimws(meta$ID)
+meta$Breed  <- trimws(meta$Breed)
+meta$Bangsa <- trimws(meta$Bangsa)
+
+eig <- read.table(eigenvec_path, header = FALSE, stringsAsFactors = FALSE)
+n_pc <- ncol(eig) - 2
+stopifnot(n_pc >= 2)
+
+colnames(eig) <- c("FID","IID",paste0("PC", seq_len(n_pc)))
+
+eigval <- scan(eigenval_path, quiet = TRUE)
+pct <- eigval / sum(eigval) * 100
+
+xlab <- sprintf("PC1 (%.2f%%)", pct[1])
+ylab <- sprintf("PC2 (%.2f%%)", pct[2])
+
+dat <- merge(eig, meta, by.x="IID", by.y="ID", all.x=TRUE)
+
+cat("\n=== Missing metadata ===\n")
+print(dat[is.na(dat$Breed) | is.na(dat$Bangsa), c("IID","PC1","PC2")])
+
+cat("\n=== Missing PC ===\n")
+print(dat[is.na(dat$PC1) | is.na(dat$PC2), c("IID","Breed","Bangsa")])
+
+dat$Bangsa <- factor(dat$Bangsa)
+dat$Breed  <- factor(dat$Breed)
 
 ########################################
-# FUNCTION
+# AUTO SHAPE & COLOR (GENERALIZED)
 ########################################
 
-norm_chr <- function(x){
-  x <- gsub("^chr","",x,ignore.case=TRUE)
-  toupper(x)
-}
+n_group <- length(levels(dat$Bangsa))
 
-allowed_chr <- as.character(1:29)
+shape_values <- rep(c(16,17,15,3,0,8,1,2,7,9), length.out = n_group)
 
 ########################################
-# LOAD AF
+# PLOT
 ########################################
 
-madura <- fread(opt$madura)
-pelaihari <- fread(opt$pelaihari)
+p <- ggplot(dat, aes(PC1, PC2)) +
+  geom_point(aes(color = Bangsa, shape = Bangsa),
+             size = 3, alpha = 0.9, na.rm = TRUE) +
+  scale_shape_manual(values = shape_values) +
+  labs(x = xlab, y = ylab, color = "Bangsa", shape = "Bangsa") +
+  theme_bw()
 
-setnames(madura,c("SNP","AF_pel","AF_mad"))
-setnames(pelaihari,c("SNP","AF_pel","AF_mad"))
+print(p)
 
-madura[,c("CHROM","POS") := tstrsplit(SNP,":")]
-pelaihari[,c("CHROM","POS") := tstrsplit(SNP,":")]
-
-madura$POS <- as.numeric(madura$POS)
-pelaihari$POS <- as.numeric(pelaihari$POS)
-
-madura$CHROM <- norm_chr(madura$CHROM)
-pelaihari$CHROM <- norm_chr(pelaihari$CHROM)
-
-madura <- madura[CHROM %in% allowed_chr]
-pelaihari <- pelaihari[CHROM %in% allowed_chr]
-
-########################################
-# DELTA AF
-########################################
-
-madura[, delta_AF := abs(AF_mad - AF_pel)]
-pelaihari[, delta_AF := abs(AF_mad - AF_pel)]
-
-########################################
-# LOAD FST
-########################################
-
-fst <- fread(opt$fst)
-fst <- fst[,.(CHROM,BIN_START,BIN_END,WEIGHTED_FST)]
-setnames(fst,c("CHROM","START","END","FST"))
-
-fst$CHROM <- norm_chr(fst$CHROM)
-fst <- fst[CHROM %in% allowed_chr]
-
-setkey(fst,CHROM,START,END)
-
-########################################
-# LOAD ROH
-########################################
-
-roh <- fread(opt$roh)
-
-setnames(roh,
-c("population","chr","start","end","freq"),
-c("POP","CHROM","START","END","ROH_FREQ"))
-
-roh$CHROM <- norm_chr(roh$CHROM)
-roh <- roh[CHROM %in% allowed_chr]
-
-roh_mad <- roh[POP=="Madura"]
-roh_pel <- roh[POP=="Pelaihari"]
-
-setkey(roh_mad,CHROM,START,END)
-setkey(roh_pel,CHROM,START,END)
-
-########################################
-# SNP INTERVAL
-########################################
-
-madura[,`:=`(SNP_START=POS,SNP_END=POS)]
-pelaihari[,`:=`(SNP_START=POS,SNP_END=POS)]
-
-setkey(madura,CHROM,SNP_START,SNP_END)
-setkey(pelaihari,CHROM,SNP_START,SNP_END)
-
-########################################
-# OVERLAP
-########################################
-
-mad <- foverlaps(madura,fst,type="within",nomatch=NA)
-mad <- foverlaps(mad,roh_mad,type="within",nomatch=NA)
-
-pel <- foverlaps(pelaihari,fst,type="within",nomatch=NA)
-pel <- foverlaps(pel,roh_pel,type="within",nomatch=NA)
-
-########################################
-# THRESHOLD
-########################################
-
-fst_thr <- quantile(fst$FST,0.99,na.rm=TRUE)
-mad_thr <- quantile(mad$delta_AF,0.99,na.rm=TRUE)
-pel_thr <- quantile(pel$delta_AF,0.99,na.rm=TRUE)
-
-mad <- mad[FST>=fst_thr & delta_AF>=mad_thr]
-pel <- pel[FST>=fst_thr & delta_AF>=pel_thr]
-
-########################################
-# LOAD GTF
-########################################
-
-gtf <- fread(opt$gtf,sep="\t",header=FALSE,skip="#")
-
-setnames(gtf,
-c("CHROM","SOURCE","FEATURE","START","END","SCORE","STRAND","FRAME","ATTRIBUTE"))
-
-gtf$CHROM <- norm_chr(gtf$CHROM)
-
-genes <- gtf[FEATURE=="gene"]
-
-genes[, gene_name := sub('.*gene_name "([^"]+)".*','\\1',ATTRIBUTE)]
-genes <- genes[,.(CHROM,START,END,gene_name)]
-
-setkey(genes,CHROM,START,END)
-
-########################################
-# ANNOTATION
-########################################
-
-mad <- foverlaps(mad,genes,type="within",nomatch=NA)
-pel <- foverlaps(pel,genes,type="within",nomatch=NA)
-
-########################################
-# CLEAN
-########################################
-
-mad <- mad[!is.na(gene_name) & !grepl("ENSBTAG",gene_name)]
-pel <- pel[!is.na(gene_name) & !grepl("ENSBTAG",gene_name)]
-
-########################################
-# BEST SNP PER GENE
-########################################
-
-mad <- mad[, .SD[which.max(FST)], by=gene_name]
-pel <- pel[, .SD[which.max(FST)], by=gene_name]
-
-mad <- mad[order(-FST,-delta_AF)]
-pel <- pel[order(-FST,-delta_AF)]
-
-########################################
-# SAVE
-########################################
-
-fwrite(mad[,.(CHROM,POS,FST,delta_AF,gene_name)],
-       file.path(opt$outdir,"Madura_candidate_genes.csv"))
-
-fwrite(pel[,.(CHROM,POS,FST,delta_AF,gene_name)],
-       file.path(opt$outdir,"Pelaihari_candidate_genes.csv"))
+ggsave(out_path, plot = p, width = 8, height = 5, dpi = 600)
