@@ -105,7 +105,7 @@ SLURM (HPC) Execution
 For execution on an HPC cluster with SLURM:
 ```bash
 snakemake \
-  --jobs 8 \
+  --jobs 4 \
   --latency-wait 60 \
   --rerun-incomplete \
   --keep-going \
