@@ -104,11 +104,14 @@ snakemake --cores 24
 SLURM (HPC) Execution
 For execution on an HPC cluster with SLURM:
 ```bash
-snakemake --cores 1 \
-  --jobs 20 \
-  --cluster "sbatch -p {partition} -c {threads} --mem=32G \
-  -o logs_slurm/%x_%j.out \
-  -e logs_slurm/%x_%j.err"
+snakemake \
+  --jobs 8 \
+  --latency-wait 60 \
+  --rerun-incomplete \
+  --keep-going \
+  --cluster-cancel scancel \
+  --default-resources mem_mb=4000 \
+  --cluster "sbatch -c {threads} --mem={resources.mem_mb}M -o logs_slurm/%x_%j.out -e logs_slurm/%x_%j.err"
 ```
 Output Structure
 All results are organized within the directory specified by OUTDIR:
