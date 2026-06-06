@@ -105,12 +105,12 @@ SLURM (HPC) Execution
 For execution on an HPC cluster with SLURM:
 ```bash
 snakemake \
-  --jobs 8 \
+  --jobs 20 \
   --latency-wait 60 \
   --rerun-incomplete \
   --keep-going \
   --cluster-cancel scancel \
-  --cluster "sbatch --spread-job -p main -c {threads} --mem={resources.mem_mb}M -o logs_slurm/%x_%j.out -e logs_slurm/%x_%j.err"
+  --cluster "sbatch --spread-job -p main -c {threads} --mem=16000M -o logs_slurm/%x_%j.out -e logs_slurm/%x_%j.err"
 ```
 Output Structure
 All results are organized within the directory specified by OUTDIR:
